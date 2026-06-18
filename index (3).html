@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>砲彈射擊對戰</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1a2e;
+    font-family: 'Courier New', monospace;
+    color: #e0e0e0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px;
+  }
+
+  h1 {
+    font-size: 1.8rem;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    color: #f5c518;
+    text-shadow: 0 0 20px #f5c51866;
+    margin-bottom: 12px;
+  }
+
+  #scoreboard {
+    display: flex;
+    gap: 40px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .score-block {
+    text-align: center;
+    min-width: 140px;
+  }
+
+  .score-label {
+    font-size: 0.75rem;
+    letter-spacing: 3px;
+    margin-bottom: 4px;
+  }
+
+  .red-label  { color: #ff4d4d; }
+  .blue-label { color: #4da6ff; }
+
+  .hp-bar-wrap {
+    background: #111;
+    border-radius: 4px;
+    height: 14px;
+    width: 140px;
+    overflow: hidden;
+    border: 1px solid #333;
+  }
+
+  .hp-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width .4s;
+  }
+
+  .red-hp  { background: linear-gradient(90deg,#ff1a1a,#ff6666); }
+  .blue-hp { background: linear-gradient(90deg,#1a6fff,#66b3ff); }
+
+  .score-pts { font-size: 1.5rem; font-weight: bold; }
+  .red-pts  { color: #ff4d4d; }
+  .blue-pts { color: #4da6ff; }
+
+  #turn-indicator {
+    font-size: 0.85rem;
+    letter-spacing: 2px;
+    padding: 4px 18px;
+    border-radius: 20px;
+    font-weight: bold;
+  }
+
+  #canvas-wrap {
+    position: relative;
+    border: 2px solid #333;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 0 40px #0008;
+  }
+
+  canvas { display: block; }
+
+  #controls {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .ctrl-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .ctrl-label {
+    font-size: 0.68rem;
+    letter-spacing: 2px;
+    color: #888;
+  }
+
+  .angle-display {
+    font-size: 1.1rem;
+    font-weight: bold;
+    min-width: 56px;
+    text-align: center;
+  }
+
+  .btn-row { display: flex; gap: 6px; }
+
+  button {
+    padding: 8px 18px;
+    border: none;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: transform .1s, opacity .1s;
+    font-weight: bold;
+  }
+
+  button:active { transform: scale(.96); }
+  button:disabled { opacity: .35; cursor: default; }
+
+  .btn-angle {
+    background: #2a2a3e;
+    color: #ccc;
+    border: 1px solid #444;
+    padding: 8px 14px;
+  }
+
+  .btn-fire {
+    background: #f5c518;
+    color: #111;
+    padding: 10px 28px;
+    font-size: 1rem;
+  }
+
+  .btn-reset {
+    background: #333;
+    color: #aaa;
+    border: 1px solid #555;
+  }
+
+  #message-bar {
+    min-height: 28px;
+    margin-top: 8px;
+    font-size: 0.9rem;
+    letter-spacing: 1px;
+    text-align: center;
+    transition: color .3s;
+  }
+
+  #overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: #000b;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    z-index: 10;
+  }
+
+  #overlay.show { display: flex; }
+
+  #overlay h2 {
+    font-size: 2.2rem;
+    letter-spacing: 6px;
+    text-shadow: 0 0 30px currentColor;
+  }
+
+  #overlay p {
+    font-size: 1rem;
+    color: #ccc;
+    letter-spacing: 2px;
+  }
+
+  #btn-restart {
+    background: #f5c518;
+    color: #111;
+    padding: 12px 36px;
+    font-size: 1rem;
+    letter-spacing: 2px;
+  }
+
+  #power-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  #power-slider { width: 120px; accent-color: #f5c518; }
+  #power-val { font-size: 1.0rem; font-weight: bold; color: #f5c518; }
+</style>
+</head>
+<body>
+
+<h1>⚔ 砲彈對戰 ⚔</h1>
+
+<div id="scoreboard">
+  <div class="score-block">
+    <div class="score-label red-label">▶ 紅軍</div>
+    <div class="hp-bar-wrap"><div class="hp-bar red-hp" id="red-hp-bar" style="width:100%"></div></div>
+    <div class="score-pts red-pts" id="red-score">HP 100 | 得分 0</div>
+  </div>
+
+  <div id="turn-indicator">—</div>
+
+  <div class="score-block">
+    <div class="score-label blue-label">藍軍 ◀</div>
+    <div class="hp-bar-wrap"><div class="hp-bar blue-hp" id="blue-hp-bar" style="width:100%"></div></div>
+    <div class="score-pts blue-pts" id="blue-score">HP 100 | 得分 0</div>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+  <div id="overlay">
+    <h2 id="overlay-title"></h2>
+    <p id="overlay-sub"></p>
+    <button id="btn-restart" onclick="startGame()">再來一局</button>
+  </div>
+</div>
+
+<div id="controls">
+  <div class="ctrl-group">
+    <span class="ctrl-label">砲管角度</span>
+    <div class="btn-row">
+      <button class="btn-angle" id="btn-up"   onclick="changeAngle(-5)">▲ +5°</button>
+      <div class="angle-display" id="angle-display">45°</div>
+      <button class="btn-angle" id="btn-down" onclick="changeAngle(+5)">▼ -5°</button>
+    </div>
+  </div>
+
+  <div class="ctrl-group" id="power-wrap">
+    <span class="ctrl-label">發射力道</span>
+    <input type="range" id="power-slider" min="30" max="100" value="60">
+    <div id="power-val">60%</div>
+  </div>
+
+  <div class="ctrl-group">
+    <span class="ctrl-label">操作</span>
+    <div class="btn-row">
+      <button class="btn-fire" id="btn-fire" onclick="fire()">🔥 開火</button>
+      <button class="btn-reset" onclick="startGame()">重置</button>
+    </div>
+  </div>
+</div>
+
+<div id="message-bar" style="color:#f5c518"></div>
+
+<script>
+// ─── Constants ──────────────────────────────────────────────────────────────
+const W = 780, H = 340;
+const GRAVITY = 0.22;
+const GROUND_Y = H - 50;
+const PRECISE_R = 10, RANGE_R = 20;
+const MAX_HP = 100;
+
+// ─── State ───────────────────────────────────────────────────────────────────
+let red, blue, turn, projectile, animId, explosions, gameOver;
+
+// ─── Canvas setup ────────────────────────────────────────────────────────────
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+canvas.width  = W;
+canvas.height = H;
+
+// ─── Power slider ─────────────────────────────────────────────────────────
+const powerSlider = document.getElementById('power-slider');
+powerSlider.addEventListener('input', () => {
+  document.getElementById('power-val').textContent = powerSlider.value + '%';
+});
+
+// ─── Tank class ──────────────────────────────────────────────────────────────
+class Tank {
+  constructor(side) {
+    this.side  = side;                         // 'red' | 'blue'
+    this.hp    = MAX_HP;
+    this.score = 0;
+    this.angle = side === 'red' ? 45 : 135;   // degrees from horizontal
+    this.color = side === 'red' ? '#e63030' : '#1a70e6';
+    this.barrel= side === 'red' ? '#c02020' : '#0a50c0';
+    this.reset();
+  }
+
+  reset() {
+    // Random X in left or right third; fixed Y on ground
+    const zone = W / 3;
+    if (this.side === 'red') {
+      this.x = 40 + Math.random() * (zone - 80);
+    } else {
+      this.x = W - zone + 40 + Math.random() * (zone - 80);
+    }
+    this.y = GROUND_Y;
+    this.hp    = MAX_HP;
+    this.score = 0;
+    this.angle = this.side === 'red' ? 45 : 135;
+  }
+
+  // Barrel tip position
+  barrelTip(len = 30) {
+    const rad = this.angle * Math.PI / 180;
+    return {
+      x: this.x + Math.cos(rad) * len,
+      y: this.y - Math.sin(rad) * len   // canvas Y is inverted
+    };
+  }
+
+  draw() {
+    const x = this.x, y = this.y;
+
+    // Shadow
+    ctx.save();
+    ctx.globalAlpha = 0.18;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 8, 30, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Tracks
+    ctx.fillStyle = '#444';
+    roundRect(ctx, x - 24, y - 4, 48, 10, 4);
+    ctx.fill();
+    // Track details
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    for (let i = -18; i <= 18; i += 9) {
+      ctx.beginPath();
+      ctx.moveTo(x + i, y - 4);
+      ctx.lineTo(x + i, y + 6);
+      ctx.stroke();
+    }
+
+    // Body
+    ctx.fillStyle = this.color;
+    roundRect(ctx, x - 20, y - 18, 40, 16, 5);
+    ctx.fill();
+    // Body highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    roundRect(ctx, x - 18, y - 17, 36, 5, 3);
+    ctx.fill();
+
+    // Turret
+    ctx.fillStyle = this.barrel;
+    ctx.beginPath();
+    ctx.arc(x, y - 20, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.arc(x - 3, y - 23, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Barrel
+    const rad = this.angle * Math.PI / 180;
+    const tx  = x + Math.cos(rad) * 28;
+    const ty  = y - Math.sin(rad) * 28;
+    ctx.strokeStyle = this.barrel;
+    ctx.lineWidth   = 5;
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x, y - 20);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+
+    // Side label
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 10px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.side === 'red' ? '紅' : '藍', x, y - 17);
+  }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function dist(ax, ay, bx, by) {
+  return Math.hypot(ax - bx, ay - by);
+}
+
+// ─── Terrain ─────────────────────────────────────────────────────────────────
+let terrainPts = [];
+
+function buildTerrain() {
+  terrainPts = [];
+  const segs = 20;
+  for (let i = 0; i <= segs; i++) {
+    const px = (i / segs) * W;
+    // Gentle hills
+    const py = GROUND_Y - 10 + Math.sin(i * 0.8) * 12 + Math.sin(i * 1.7 + 1) * 8;
+    terrainPts.push({ x: px, y: py });
+  }
+}
+
+function drawTerrain() {
+  // Sky gradient
+  const sky = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+  sky.addColorStop(0, '#0d1b3e');
+  sky.addColorStop(1, '#1e3a5f');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  const stars = [[50,20],[120,45],[200,15],[310,35],[430,10],[550,30],[660,18],[720,40]];
+  stars.forEach(([sx, sy]) => {
+    ctx.beginPath();
+    ctx.arc(sx, sy, 1, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Ground fill
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  ctx.lineTo(0, terrainPts[0].y);
+  terrainPts.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  const grd = ctx.createLinearGradient(0, GROUND_Y, 0, H);
+  grd.addColorStop(0, '#3a6b35');
+  grd.addColorStop(0.3, '#2d5228');
+  grd.addColorStop(1, '#1a2e18');
+  ctx.fillStyle = grd;
+  ctx.fill();
+
+  // Ground edge line
+  ctx.strokeStyle = '#5a9e50';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  terrainPts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.stroke();
+}
+
+// ─── Explosion particles ──────────────────────────────────────────────────────
+function spawnExplosion(x, y, color, precise) {
+  const count = precise ? 22 : 12;
+  for (let i = 0; i < count; i++) {
+    const spd = precise ? (2 + Math.random() * 5) : (1 + Math.random() * 3);
+    const ang = Math.random() * Math.PI * 2;
+    explosions.push({
+      x, y,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd,
+      life: 1,
+      decay: 0.03 + Math.random() * 0.04,
+      r: precise ? (3 + Math.random() * 4) : (2 + Math.random() * 3),
+      color
+    });
+  }
+  // Shockwave ring
+  explosions.push({ type: 'ring', x, y, r: 4, maxR: precise ? 40 : 22, life: 1, color });
+}
+
+function updateDrawExplosions() {
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    const e = explosions[i];
+    if (e.type === 'ring') {
+      e.r += (e.maxR - e.r) * 0.18;
+      e.life -= 0.06;
+      ctx.save();
+      ctx.globalAlpha = e.life * 0.7;
+      ctx.strokeStyle = e.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      if (e.life <= 0) explosions.splice(i, 1);
+    } else {
+      e.x  += e.vx;
+      e.y  += e.vy;
+      e.vy += GRAVITY * 0.5;
+      e.life -= e.decay;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, e.life);
+      ctx.fillStyle = e.color;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      if (e.life <= 0) explosions.splice(i, 1);
+    }
+  }
+}
+
+// ─── UI update ────────────────────────────────────────────────────────────────
+function updateUI() {
+  const ri = document.getElementById;
+  ri('red-score').textContent  = `HP ${red.hp}  |  得分 ${red.score}`;
+  ri('blue-score').textContent = `HP ${blue.hp}  |  得分 ${blue.score}`;
+  ri('red-hp-bar').style.width  = (red.hp / MAX_HP * 100)  + '%';
+  ri('blue-hp-bar').style.width = (blue.hp / MAX_HP * 100) + '%';
+
+  const ti = ri('turn-indicator');
+  if (gameOver) {
+    ti.textContent  = '遊戲結束';
+    ti.style.cssText = 'background:#333;color:#f5c518;padding:4px 18px;border-radius:20px;font-weight:bold;font-size:.85rem;letter-spacing:2px;';
+  } else if (turn === 'red') {
+    ti.textContent  = '▶ 紅軍回合';
+    ti.style.cssText = 'background:#e63030;color:#fff;padding:4px 18px;border-radius:20px;font-weight:bold;font-size:.85rem;letter-spacing:2px;';
+  } else {
+    ti.textContent  = '藍軍回合 ◀';
+    ti.style.cssText = 'background:#1a70e6;color:#fff;padding:4px 18px;border-radius:20px;font-weight:bold;font-size:.85rem;letter-spacing:2px;';
+  }
+
+  const current = turn === 'red' ? red : blue;
+  ri('angle-display').textContent = Math.round(current.angle) + '°';
+  ri('angle-display').style.color = turn === 'red' ? '#ff6666' : '#66b3ff';
+
+  const firing = !!projectile;
+  ri('btn-fire').disabled = firing || gameOver;
+  ri('btn-up').disabled   = firing || gameOver;
+  ri('btn-down').disabled = firing || gameOver;
+  ri('power-slider').disabled = firing || gameOver;
+}
+
+function showMessage(msg, color = '#f5c518') {
+  const el = document.getElementById('message-bar');
+  el.textContent = msg;
+  el.style.color = color;
+}
+
+// ─── Angle control ────────────────────────────────────────────────────────────
+function changeAngle(delta) {
+  if (gameOver || projectile) return;
+  const current = turn === 'red' ? red : blue;
+  if (turn === 'red') {
+    current.angle = Math.min(170, Math.max(10, current.angle - delta));
+  } else {
+    current.angle = Math.min(170, Math.max(10, current.angle + delta));
+  }
+  drawScene();
+  updateUI();
+}
+
+// ─── Fire ────────────────────────────────────────────────────────────────────
+function fire() {
+  if (projectile || gameOver) return;
+  const attacker = turn === 'red' ? red : blue;
+  const power = parseInt(powerSlider.value) / 100;
+  const speed = 8 + power * 10;
+  const rad = attacker.angle * Math.PI / 180;
+
+  const tip = attacker.barrelTip(32);
+  projectile = {
+    x:  tip.x,
+    y:  tip.y,
+    vx: Math.cos(rad) * speed,
+    vy: -Math.sin(rad) * speed,
+    owner: turn,
+    trail: []
+  };
+  showMessage('💨 砲彈飛行中…', '#ccc');
+  loop();
+}
+
+// ─── Game loop ────────────────────────────────────────────────────────────────
+function loop() {
+  cancelAnimationFrame(animId);
+  animId = requestAnimationFrame(step);
+}
+
+function step() {
+  if (!projectile) { drawScene(); return; }
+
+  // Update projectile
+  projectile.trail.push({ x: projectile.x, y: projectile.y });
+  if (projectile.trail.length > 28) projectile.trail.shift();
+
+  projectile.x  += projectile.vx;
+  projectile.y  += projectile.vy;
+  projectile.vy += GRAVITY;
+
+  const attacker = projectile.owner === 'red' ? red : blue;
+  const target   = projectile.owner === 'red' ? blue : red;
+
+  // Hit detection against target tank
+  const d = dist(projectile.x, projectile.y, target.x, target.y - 14);
+  let hit = false;
+
+  if (d <= PRECISE_R) {
+    hit = true;
+    attacker.score += 5;
+    target.hp = Math.max(0, target.hp - 5);
+    spawnExplosion(projectile.x, projectile.y, '#ffd700', true);
+    showMessage('🎯 精準命中！ +5分 / 對方 -5HP', '#ffd700');
+  } else if (d <= RANGE_R) {
+    hit = true;
+    attacker.score += 2;
+    target.hp = Math.max(0, target.hp - 2);
+    spawnExplosion(projectile.x, projectile.y, '#ff8c00', false);
+    showMessage('💥 範圍命中！ +2分 / 對方 -2HP', '#ff8c00');
+  }
+
+  // Out of bounds or hit ground/wall
+  if (!hit && (projectile.y > GROUND_Y + 5 || projectile.x < 0 || projectile.x > W)) {
+    if (projectile.y > GROUND_Y) {
+      spawnExplosion(projectile.x, GROUND_Y - 2, '#8B6914', false);
+    }
+    hit = true;
+    if (projectile.y > GROUND_Y) showMessage('🪨 落地未命中', '#888');
+    else showMessage('🌊 砲彈飛出邊界', '#888');
+  }
+
+  if (hit) {
+    projectile = null;
+    updateUI();
+
+    // Check win condition
+    if (target.hp <= 0) {
+      endGame(attacker.side);
+      drawScene();
+      return;
+    }
+
+    // Switch turns
+    turn = turn === 'red' ? 'blue' : 'red';
+    updateUI();
+    drawScene();
+    return;
+  }
+
+  drawScene();
+  animId = requestAnimationFrame(step);
+}
+
+// ─── Drawing ──────────────────────────────────────────────────────────────────
+function drawScene() {
+  ctx.clearRect(0, 0, W, H);
+  drawTerrain();
+
+  // Draw tanks
+  red.draw();
+  blue.draw();
+
+  // Draw projectile trail
+  if (projectile) {
+    projectile.trail.forEach((p, i) => {
+      const alpha = (i / projectile.trail.length) * 0.6;
+      const r = 1 + (i / projectile.trail.length) * 2;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = projectile.owner === 'red' ? '#ff8866' : '#66aaff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+
+    // Projectile ball
+    const glow = ctx.createRadialGradient(
+      projectile.x, projectile.y, 1,
+      projectile.x, projectile.y, 7
+    );
+    glow.addColorStop(0, '#fff');
+    glow.addColorStop(0.4, projectile.owner === 'red' ? '#ff4444' : '#4488ff');
+    glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(projectile.x, projectile.y, 7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Explosions
+  updateDrawExplosions();
+
+  // Range indicator (faint circle on target tank)
+  if (!projectile && !gameOver) {
+    const target = turn === 'red' ? blue : red;
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = turn === 'red' ? '#ff4444' : '#4488ff';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(target.x, target.y - 14, RANGE_R, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 0.2;
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(target.x, target.y - 14, PRECISE_R, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  updateUI();
+}
+
+// ─── Game lifecycle ───────────────────────────────────────────────────────────
+function startGame() {
+  cancelAnimationFrame(animId);
+  buildTerrain();
+  red   = new Tank('red');
+  blue  = new Tank('blue');
+  turn  = Math.random() < 0.5 ? 'red' : 'blue';
+  projectile = null;
+  explosions = [];
+  gameOver   = false;
+
+  document.getElementById('overlay').classList.remove('show');
+  powerSlider.value = 60;
+  document.getElementById('power-val').textContent = '60%';
+
+  showMessage(turn === 'red' ? '🔴 紅軍先手！' : '🔵 藍軍先手！',
+              turn === 'red' ? '#ff6666' : '#66b3ff');
+  drawScene();
+}
+
+function endGame(winner) {
+  gameOver = true;
+  const ov   = document.getElementById('overlay');
+  const otl  = document.getElementById('overlay-title');
+  const osub = document.getElementById('overlay-sub');
+  if (winner === 'red') {
+    otl.textContent  = '🔴 紅軍勝利！';
+    otl.style.color  = '#ff4d4d';
+  } else {
+    otl.textContent  = '🔵 藍軍勝利！';
+    otl.style.color  = '#4da6ff';
+  }
+  const w = winner === 'red' ? red : blue;
+  const l = winner === 'red' ? blue : red;
+  osub.textContent = `勝者得分：${w.score}　 敗者 HP：${l.hp}`;
+  ov.classList.add('show');
+  updateUI();
+}
+
+// ─── Keyboard shortcuts ───────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowUp')    changeAngle(-5);
+  if (e.key === 'ArrowDown')  changeAngle(+5);
+  if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); fire(); }
+});
+
+// ─── Bootstrap ────────────────────────────────────────────────────────────────
+startGame();
+</script>
+</body>
+</html>
