@@ -238,6 +238,12 @@ button:disabled { opacity: 0.35; cursor: default; }
   </div>
 
   <div class="ctrl-group">
+    <span class="ctrl-label">本回合剩餘移動</span>
+    <div class="angle-display" id="move-display" style="color:#aaffaa">20px</div>
+    <div style="font-size:0.65rem;color:#666;letter-spacing:1px;">← → 鍵移動，每px消耗1分</div>
+  </div>
+
+  <div class="ctrl-group">
     <span class="ctrl-label">發射力道</span>
     <input type="range" id="power-slider" min="30" max="100" value="60">
     <div id="power-val">60%</div>
@@ -253,8 +259,9 @@ button:disabled { opacity: 0.35; cursor: default; }
 </div>
 
 <div class="legend">
-  <span>🟡 精準命中 ≤10px (+5分 / -5HP)</span>
-  <span>🟠 範圍命中 10~20px (+2分 / -2HP)</span>
+  <span>🟡 精準命中 砲塔/車體 (+5分 / -5HP)</span>
+  <span>🟠 範圍命中 履帶 (+2分 / -2HP)</span>
+  <span>🚗 移動 ←→鍵，每px -1分，上限20px/回合</span>
 </div>
 
 <div id="message-bar" style="color:#f5c518">載入中…</div>
@@ -265,11 +272,11 @@ button:disabled { opacity: 0.35; cursor: default; }
   var W = 780, H = 340;
   var GRAVITY   = 0.22;
   var GROUND_Y  = H - 50;
-  var PRECISE_R = 10;
-  var RANGE_R   = 20;
-  var MAX_HP    = 100;
-  var TRAIL_LEN = 40;   // stored trail points
-  var PREDICT_STEPS = 120; // prediction arc steps
+  var PRECISE_R  = 10;
+  var RANGE_R    = 30;
+  var MAX_HP     = 100;
+  var MAX_MOVE   = 20;  // max pixels per turn
+  var TRAIL_LEN  = 40;
 
   // ── DOM refs (safe: bound to document) ───────────────────────────────────
   var elRedScore    = document.getElementById('red-score');
@@ -289,6 +296,7 @@ button:disabled { opacity: 0.35; cursor: default; }
   var elBtnRestart  = document.getElementById('btn-restart');
   var elPowerSlider = document.getElementById('power-slider');
   var elPowerVal    = document.getElementById('power-val');
+  var elMoveDisp    = document.getElementById('move-display');
 
   var canvas = document.getElementById('canvas');
   var ctx    = canvas.getContext('2d');
@@ -300,12 +308,13 @@ button:disabled { opacity: 0.35; cursor: default; }
 
   // ── Tank ───────────────────────────────────────────────────────────────────
   function Tank(side) {
-    this.side   = side;
-    this.hp     = MAX_HP;
-    this.score  = 0;
-    this.color  = side === 'red' ? '#e63030' : '#1a70e6';
-    this.barrel = side === 'red' ? '#b01818' : '#0848b0';
-    this.angle  = side === 'red' ? 45 : 135;
+    this.side     = side;
+    this.hp       = MAX_HP;
+    this.score    = 0;
+    this.color    = side === 'red' ? '#e63030' : '#1a70e6';
+    this.barrel   = side === 'red' ? '#b01818' : '#0848b0';
+    this.angle    = side === 'red' ? 45 : 135;
+    this.moveUsed = 0;  // pixels moved this turn
     var zone = W / 3;
     if (side === 'red') {
       this.x = 40 + Math.random() * (zone - 80);
@@ -510,37 +519,6 @@ button:disabled { opacity: 0.35; cursor: default; }
     }
   }
 
-  // ── Prediction arc ─────────────────────────────────────────────────────────
-  function drawPredictionArc(tank) {
-    var power = parseInt(elPowerSlider.value, 10) / 100;
-    var speed = 8 + power * 10;
-    var rad   = tank.angle * Math.PI / 180;
-    var tip   = tank.barrelTip(32);
-    var px = tip.x, py = tip.y;
-    var vx = Math.cos(rad) * speed;
-    var vy = -Math.sin(rad) * speed;
-    var color = tank.side === 'red' ? 'rgba(255,100,80,' : 'rgba(80,150,255,';
-
-    ctx.save();
-    ctx.setLineDash([4, 6]);
-    ctx.lineWidth = 1.5;
-
-    for (var i = 0; i < PREDICT_STEPS; i++) {
-      px += vx;
-      py += vy;
-      vy += GRAVITY;
-      if (px < 0 || px > W || py > GROUND_Y + 10) break;
-      var alpha = 0.5 * (1 - i / PREDICT_STEPS);
-      ctx.strokeStyle = color + alpha + ')';
-      ctx.beginPath();
-      ctx.arc(px, py, 1.5, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    ctx.setLineDash([]);
-    ctx.restore();
-  }
-
   // ── UI update ──────────────────────────────────────────────────────────────
   function updateUI() {
     elRedScore.textContent  = 'HP ' + redTank.hp  + ' | 得分 ' + redTank.score;
@@ -551,6 +529,11 @@ button:disabled { opacity: 0.35; cursor: default; }
     var current = turn === 'red' ? redTank : blueTank;
     elAngleDisp.textContent = Math.round(current.angle) + '°';
     elAngleDisp.style.color = turn === 'red' ? '#ff6666' : '#66b3ff';
+
+    // Move budget display
+    var remaining = MAX_MOVE - current.moveUsed;
+    elMoveDisp.textContent = remaining + 'px';
+    elMoveDisp.style.color = remaining > 0 ? '#aaffaa' : '#ff8888';
 
     if (gameOver) {
       elTurnInd.textContent = '遊戲結束';
@@ -578,11 +561,34 @@ button:disabled { opacity: 0.35; cursor: default; }
     elMsgBar.style.color = color || '#f5c518';
   }
 
+  // ── Tank movement ──────────────────────────────────────────────────────────
+  function moveTank(dir) {
+    // dir: +1 = right, -1 = left
+    if (gameOver || projectile) return;
+    var tank = turn === 'red' ? redTank : blueTank;
+    var remaining = MAX_MOVE - tank.moveUsed;
+    if (remaining <= 0) {
+      showMessage('⛔ 本回合移動已達上限（20px）', '#ff8888');
+      return;
+    }
+    if (tank.score <= 0) {
+      showMessage('⛔ 得分不足，無法移動', '#ff8888');
+      return;
+    }
+    // Boundary: keep tank body within canvas
+    var newX = tank.x + dir;
+    if (newX < 26 || newX > W - 26) return;
+    tank.x = newX;
+    tank.moveUsed += 1;
+    tank.score    -= 1;
+    drawScene();
+    updateUI();
+  }
+
   // ── Angle control ──────────────────────────────────────────────────────────
   function changeAngle(delta) {
     if (gameOver || projectile) return;
     var current = turn === 'red' ? redTank : blueTank;
-    // Red: ▲ increases angle (shoot higher), Blue mirrors
     if (turn === 'red') {
       current.angle = Math.min(170, Math.max(10, current.angle + delta));
     } else {
@@ -634,22 +640,83 @@ button:disabled { opacity: 0.35; cursor: default; }
     var attacker = projectile.owner === 'red' ? redTank : blueTank;
     var target   = projectile.owner === 'red' ? blueTank : redTank;
 
-    // Hit detection
-    var d   = dist(projectile.x, projectile.y, target.x, target.y - 14);
+    // ── Shape-based hit detection ──────────────────────────────────────────
+    // Test the trajectory segment (prev frame → current frame) against each
+    // part of the tank so fast shells never tunnel through.
+    //
+    // Precise : turret circle  (cx=tx, cy=ty-20, r=11)
+    //           body rectangle (tx-20 ~ tx+20, ty-18 ~ ty-2)
+    // Range   : track rectangle (tx-24 ~ tx+24, ty-4 ~ ty+6)
+
+    var tx = target.x, ty = target.y;
+
+    // Previous projectile position (before this frame's move)
+    var x0 = projectile.x - projectile.vx;
+    var y0 = projectile.y - (projectile.vy - GRAVITY); // vy already includes this frame's gravity
+    var x1 = projectile.x, y1 = projectile.y;
+
+    // --- helpers ---
+    // Closest point on segment (x0,y0)→(x1,y1) to point (px,py)
+    function closestOnSeg(px, py) {
+      var sdx = x1 - x0, sdy = y1 - y0;
+      var len2 = sdx * sdx + sdy * sdy;
+      if (len2 === 0) return { x: x0, y: y0 };
+      var t = Math.max(0, Math.min(1, ((px - x0) * sdx + (py - y0) * sdy) / len2));
+      return { x: x0 + t * sdx, y: y0 + t * sdy };
+    }
+
+    // Minimum distance from segment to circle centre
+    function segToCircleDist(cx, cy) {
+      var cp = closestOnSeg(cx, cy);
+      return dist(cp.x, cp.y, cx, cy);
+    }
+
+    // Minimum distance from segment to axis-aligned rectangle
+    // (clamp closest seg point into rect, then measure)
+    function segToRectDist(rx1, ry1, rx2, ry2) {
+      // sample several points along the segment for robustness
+      var minD = Infinity;
+      var steps = 8;
+      for (var si = 0; si <= steps; si++) {
+        var frac = si / steps;
+        var sx = x0 + (x1 - x0) * frac;
+        var sy = y0 + (y1 - y0) * frac;
+        var cx2 = Math.max(rx1, Math.min(rx2, sx));
+        var cy2 = Math.max(ry1, Math.min(ry2, sy));
+        var d2 = dist(sx, sy, cx2, cy2);
+        if (d2 < minD) minD = d2;
+      }
+      return minD;
+    }
+
+    // Turret: circle at (tx, ty-20) r=11
+    var dTurret = segToCircleDist(tx, ty - 20);
+    var hitTurret = dTurret <= 11;
+
+    // Body: rect x∈[tx-20, tx+20], y∈[ty-18, ty-2]
+    var dBody = segToRectDist(tx - 20, ty - 18, tx + 20, ty - 2);
+    var hitBody = dBody <= 0; // inside or touching rect
+
+    // Track: rect x∈[tx-24, tx+24], y∈[ty-4, ty+6]
+    var dTrack = segToRectDist(tx - 24, ty - 4, tx + 24, ty + 6);
+    var hitTrack = dTrack <= 0;
+
     var hit = false;
 
-    if (d <= PRECISE_R) {
+    if (hitTurret || hitBody) {
+      // Precise hit — turret or body contact
       hit = true;
       attacker.score += 5;
       target.hp = Math.max(0, target.hp - 5);
       spawnExplosion(projectile.x, projectile.y, '#ffd700', true);
       showMessage('🎯 精準命中！  +5分 / 對方 -5HP', '#ffd700');
-    } else if (d <= RANGE_R) {
+    } else if (hitTrack) {
+      // Range hit — track contact only
       hit = true;
       attacker.score += 2;
       target.hp = Math.max(0, target.hp - 2);
       spawnExplosion(projectile.x, projectile.y, '#ff8c00', false);
-      showMessage('💥 範圍命中！  +2分 / 對方 -2HP', '#ff8c00');
+      showMessage('💥 範圍命中（履帶）！  +2分 / 對方 -2HP', '#ff8c00');
     }
 
     // Out of bounds / ground
@@ -675,6 +742,9 @@ button:disabled { opacity: 0.35; cursor: default; }
       }
 
       turn = turn === 'red' ? 'blue' : 'red';
+      // Reset move budget for the new turn
+      var nextTank = turn === 'red' ? redTank : blueTank;
+      nextTank.moveUsed = 0;
       updateUI();
       return;
     }
@@ -687,49 +757,52 @@ button:disabled { opacity: 0.35; cursor: default; }
     ctx.clearRect(0, 0, W, H);
     drawTerrain();
 
-    // Prediction arc (only when idle)
-    if (!projectile && !gameOver) {
-      var activeTank = turn === 'red' ? redTank : blueTank;
-      drawPredictionArc(activeTank);
-    }
-
-    // Hit zone indicator on target
-    if (!projectile && !gameOver) {
-      var tgt = turn === 'red' ? blueTank : redTank;
-      ctx.save();
-      ctx.setLineDash([4, 4]);
-      ctx.lineWidth   = 1;
-      ctx.globalAlpha = 0.25;
-      ctx.strokeStyle = turn === 'red' ? '#ff8844' : '#44aaff';
-      ctx.beginPath(); ctx.arc(tgt.x, tgt.y - 14, RANGE_R,   0, Math.PI * 2); ctx.stroke();
-      ctx.globalAlpha = 0.4;
-      ctx.setLineDash([]);
-      ctx.strokeStyle = '#ffd700';
-      ctx.beginPath(); ctx.arc(tgt.x, tgt.y - 14, PRECISE_R, 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
-    }
-
     redTank.draw();
     blueTank.draw();
 
+    // Hit zone indicator on target — drawn AFTER tanks so it overlays cleanly
+    if (!projectile && !gameOver) {
+      var tgt = turn === 'red' ? blueTank : redTank;
+      var tx2 = tgt.x, ty2 = tgt.y;
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.lineDashOffset = 0;
+      ctx.lineWidth = 1;
+
+      // Track rect (range hit) — orange
+      ctx.globalAlpha = 0.4;
+      ctx.strokeStyle = '#ff8844';
+      ctx.strokeRect(tx2 - 24, ty2 - 4, 48, 10);
+
+      // Body rect (precise hit) — gold
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = '#ffd700';
+      ctx.strokeRect(tx2 - 20, ty2 - 18, 40, 16);
+
+      ctx.restore();
+      // Explicitly reset lineDash after restore (some browsers don't restore it)
+      ctx.setLineDash([]);
+    }
+
     // Projectile trail + ball
     if (projectile) {
+      ctx.setLineDash([]); // ensure no dash pattern from previous draw
       var trailColor = projectile.owner === 'red' ? 'rgba(255,120,80,' : 'rgba(80,160,255,';
       for (var i = 0; i < projectile.trail.length; i++) {
-        var t  = projectile.trail[i];
+        var t   = projectile.trail[i];
         var pct = (i + 1) / projectile.trail.length;
-        var tr  = pct * 3;
-        ctx.save();
-        ctx.globalAlpha = pct * 0.7;
-        ctx.fillStyle   = trailColor + pct + ')';
+        var tr  = 1 + pct * 2.5;
+        ctx.globalAlpha = pct * 0.75;
+        ctx.fillStyle   = trailColor + '1)';
         ctx.beginPath();
         ctx.arc(t.x, t.y, tr, 0, Math.PI * 2);
         ctx.fill();
-        ctx.restore();
       }
+      ctx.globalAlpha = 1;
 
-      // Glowing ball
+      // Glowing ball — use shadow only on the ball itself
       ctx.save();
+      ctx.setLineDash([]);
       ctx.shadowColor = projectile.owner === 'red' ? '#ff4444' : '#4488ff';
       ctx.shadowBlur  = 12;
       ctx.fillStyle   = '#ffffff';
@@ -737,6 +810,7 @@ button:disabled { opacity: 0.35; cursor: default; }
       ctx.arc(projectile.x, projectile.y, 4, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+      ctx.shadowBlur = 0; // always clear shadow after use
     }
 
     updateDrawExplosions();
@@ -754,6 +828,9 @@ button:disabled { opacity: 0.35; cursor: default; }
     projectile = null;
     explosions = [];
     gameOver   = false;
+    // Reset move budget for first turn
+    var firstTank = turn === 'red' ? redTank : blueTank;
+    firstTank.moveUsed = 0;
 
     elOverlay.classList.remove('show');
     elPowerSlider.value = 60;
@@ -791,13 +868,14 @@ button:disabled { opacity: 0.35; cursor: default; }
 
   elPowerSlider.addEventListener('input', function () {
     elPowerVal.textContent = elPowerSlider.value + '%';
-    if (!projectile && !gameOver) drawScene(); // refresh prediction arc
   });
 
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'ArrowUp')                         { e.preventDefault(); changeAngle(5);  }
-    if (e.key === 'ArrowDown')                       { e.preventDefault(); changeAngle(-5); }
-    if (e.key === ' ' || e.key === 'Enter')          { e.preventDefault(); fire();          }
+    if (e.key === 'ArrowLeft')              { e.preventDefault(); moveTank(-1); }
+    if (e.key === 'ArrowRight')             { e.preventDefault(); moveTank(+1); }
+    if (e.key === 'ArrowUp')               { e.preventDefault(); changeAngle(5);  }
+    if (e.key === 'ArrowDown')             { e.preventDefault(); changeAngle(-5); }
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); fire();         }
   });
 
   // ── Boot ───────────────────────────────────────────────────────────────────
